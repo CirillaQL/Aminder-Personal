@@ -1,26 +1,37 @@
 from abc import ABC, abstractmethod
-import google.generativeai as genai
+from google import genai
 from config import Config
+from google.genai import types
 
 class AIBackend(ABC):
     @abstractmethod
-    def send_message(self, message) -> str:
+    def send_message(self, message, web_search: bool = False) -> str | None:
         pass
 
-class GeminiClient(AIBackend):
+class GeminiClient(AIBackend):# Class variable to hold the client instance
     def __init__(self, ai_config):
         self.api_key = ai_config.get("api_key")
-        self.model_name = ai_config.get("model", "gemini-pro") # Default to gemini-pro if not set
+        self.model_name = ai_config.get("model", "gemini-3-pro-preview") # Default to gemini-pro if not set
         
         if not self.api_key:
             raise ValueError("API Key not found in configuration.")
             
-        genai.configure(api_key=self.api_key) # type: ignore
-        self.model = genai.GenerativeModel(self.model_name) # type: ignore
+        self.client = genai.Client(api_key=self.api_key)
 
-    def send_message(self, message):
+    def send_message(self, message, web_search: bool = False):
         try:
-            response = self.model.generate_content(message)
+            config = types.GenerateContentConfig()
+            if web_search:
+                grounding_tool = types.Tool(
+                    google_search=types.GoogleSearch()
+                )
+                config = types.GenerateContentConfig(tools=[grounding_tool])
+            
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=message,
+                config=config
+            )
             return response.text
         except Exception as e:
             return f"Error communicating with AI: {str(e)}"
@@ -33,7 +44,7 @@ class OpenAIClient(AIBackend):
         # import openai
         # self.client = openai.OpenAI(api_key=self.api_key)
 
-    def send_message(self, message):
+    def send_message(self, message, web_search: bool = False):
         # 实现 OpenAI 的发送逻辑
         return "OpenAI implementation is not yet configured."
 
@@ -50,5 +61,5 @@ class AIProvider:
         else:
             raise ValueError(f"Unsupported AI provider: {self.provider_name}")
 
-    def send_message(self, message):
-        return self.client.send_message(message)
+    def send_message(self, message, web_search: bool = False):
+        return self.client.send_message(message, web_search=web_search)

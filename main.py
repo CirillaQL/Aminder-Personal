@@ -5,7 +5,7 @@ import os
 from personal.personal import Person
 
 async def main():
-    girl = Person(name="李诗情", gender="Female", if_original=True)
+    girl = Person(name="李诗情", gender="Female", if_original=False)
 
     print(f"输入一段描述角色性格的话: ")
     try:
