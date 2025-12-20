@@ -1,18 +1,19 @@
 import asyncio
 import sys
 import os
+from prompt_toolkit import prompt
 
 from personal.personal import Person
 
 def main():
     # 1. 实例化角色
     # 如果你是 Gemini，建议在 System Prompt 里加一句防止被过度审查的安全声明（这通常在 AIProvider 里处理，或者写在 Person 的 Kernel 里）
-    girl = Person(name="Asuka", gender="Female", if_original=False)
+    girl = Person(name="李诗情", gender="Female", if_original=False)
     print(f"=== 初始化角色: {girl.name} (Powered by Gemini) ===")
     # 2. 初始化大五人格
     print(f"请输入一段描述 {girl.name} 性格的话: ")
     try:
-        description = input(">> ").strip()
+        description = prompt(">> ").strip()
     except EOFError:
         return
     print("正在构建人格模型...")
@@ -30,7 +31,7 @@ def main():
     chat_history = []
     while True:
         try:
-            user_input = input("\n你: ").strip()
+            user_input = prompt("\n你: ").strip()
         except EOFError:
             break
         if not user_input: continue

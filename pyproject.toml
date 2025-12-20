@@ -8,5 +8,6 @@ dependencies = [
     "google-genai>=1.55.0",
     "google-generativeai>=0.8.5",
     "openmemory-py>=1.2.3",
+    "prompt-toolkit>=3.0.52",
     "pyyaml>=6.0.3",
 ]
