@@ -3,7 +3,7 @@ import sys
 import os
 from prompt_toolkit import prompt
 
-from personal.personal import Person
+from personal.person import Person
 
 def main():
     # 1. 实例化角色
@@ -40,11 +40,27 @@ def main():
         
         try:
             # 调用更新后的 generate_response
-            response = girl.generate_response(user_input, chat_history)
+            response_stream = girl.generate_response(user_input, chat_history)
         except Exception as e:
             print(f"Error: {e}")
             continue
-        print(f"\n{girl.name}: {response}")
+            
+        print(f"\n{girl.name}: ", end="", flush=True)
+        full_response = ""
+        try:
+            for chunk in response_stream:
+                # Handle liteLLM streaming chunks
+                if chunk and hasattr(chunk, 'choices') and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if hasattr(delta, 'content') and delta.content:
+                        content = delta.content
+                        print(content, end="", flush=True)
+                        full_response += content
+        except Exception as e:
+            print(f"\n[Error during streaming]: {e}")
+
+        print() # Newline after full response
+        
         # === 关键：历史记录存储策略 ===
         # 我们只存“纯粹”的对话内容，不存 system prompt。
         # 下一次 generate_response 时，代码会自动再次把 prompt 包裹上去。
@@ -53,7 +69,7 @@ def main():
         # 注意：这里只存 user_input，不要存那些 system prompt，
         # 否则对话历史会变得非常长且重复。
         chat_history.append({"role": "user", "content": user_input})
-        chat_history.append({"role": "assistant", "content": response})
+        chat_history.append({"role": "assistant", "content": full_response})
         # 3. 简单的滑动窗口（防止历史太长爆 Token）
         if len(chat_history) > 10:
             chat_history = chat_history[-10:]

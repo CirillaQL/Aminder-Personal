@@ -4,12 +4,13 @@ import re
 import sys
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any, Generator
 
-# 将项目根目录加入 sys.path，解决找不到 chat 模块的问题
+# 将项目根目录加入 sys.path，解决找不到模块的问题
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from chat.client import AIProvider
+from ai.client import AIClient
+from config import Config
 
 @dataclass
 class BigFiveProfile:
@@ -88,7 +89,7 @@ class Person(object):
         self.name = name
         self.if_original = if_original
         self.gender = gender
-        self.ai_client = AIProvider() # 假设你已经定义了这个类
+        self.ai_client = AIClient() # 使用新的 AIClient
         # 2. 大五人格 & 情绪
         self.personality = BigFiveProfile()
         self.mood = EmotionalState()
@@ -119,11 +120,45 @@ STEP 3: TONE & STYLE VERIFICATION
 - **Anti-Robot Filter:** Scan the draft for words like "help you with tasks", "digital steward", "capabilities". REPLACE them with human expressions like "give you a hand", "partner", "strengths".
 """
 
+    def _collect_response(self, stream_response):
+        """Helper to collect full text from a stream or string."""
+        text = ""
+        
+        def get_attr(obj, attr):
+            """Safe attribute/key access helper."""
+            if isinstance(obj, dict):
+                return obj.get(attr)
+            return getattr(obj, attr, None)
+
+        # Check if generator
+        if hasattr(stream_response, '__iter__') and not isinstance(stream_response, (str, dict)):
+            for chunk in stream_response:
+                choices = get_attr(chunk, 'choices')
+                if choices and len(choices) > 0:
+                    first_choice = choices[0]
+                    delta = get_attr(first_choice, 'delta')
+                    if delta:
+                        content = get_attr(delta, 'content')
+                        if content:
+                            text += content
+        else:
+            # Non-streaming object
+            choices = get_attr(stream_response, 'choices')
+            if choices and len(choices) > 0:
+                first_choice = choices[0]
+                message = get_attr(first_choice, 'message')
+                if message:
+                     content = get_attr(message, 'content')
+                     if content:
+                         text = content
+        return text
+
     def init_big_five_profile(self, description: str):
         """初始化大五人格配置"""
+        prompt_content = ""
         if self.if_original:
             # if character is original, use description to set personality
-            description_prompt = f"""
+            prompt_content = f"""
 你是专业的心理学家，请根据以下角色描述，分析并量化该角色的大五人格特质 (0.0 ~ 1.0),并根据描述生成相应的定格traits：
 角色描述: {description}
 请只返回一个 JSON 格式的文本，格式如下，不要添加任何其他内容：
@@ -136,27 +171,10 @@ STEP 3: TONE & STYLE VERIFICATION
   "traits": ["trait1", "trait2", ...]
 }}
 """
-            response = self.ai_client.send_message(description_prompt, web_search=False)
-            
-            try:
-                print(f"[BigFive Init] AI Response: {response}")
-                if response is None:
-                    raise ValueError("No response from AI client.")
-                # 移除可能存在的 markdown 代码块标记 (```json ... ```)
-                cleaned_response = re.sub(r'^```json\s*|\s*```$', '', response.strip(), flags=re.MULTILINE)
-                data = json.loads(cleaned_response)
-                self.personality.openness = max(0.0, min(1.0, data.get("openness", 0.5)))
-                self.personality.conscientiousness = max(0.0, min(1.0, data.get("conscientiousness", 0.5)))
-                self.personality.extraversion = max(0.0, min(1.0, data.get("extraversion", 0.5)))
-                self.personality.agreeableness = max(0.0, min(1.0, data.get("agreeableness", 0.5)))
-                self.personality.neuroticism = max(0.0, min(1.0, data.get("neuroticism", 0.5)))
-                self.personality.traits = data.get("traits", [])
-            except Exception as e:
-                print(f"[BigFive Init Error] {e}")
         else:
-            # character is not original, so we need to search web and use description to set personality.
-            description_prompt = f"""
-你是专业的心理学家, 请联网检索角色 {self.name} 的信息，并根据以下角色描述，分析并量化该角色的大五人格特质 (0.0 ~ 1.0),并根据描述生成相应的定格traits：
+            # character is not original
+            prompt_content = f"""
+你是专业的心理学家, 请利用你的知识库检索角色 {self.name} 的信息，并根据以下角色描述，分析并量化该角色的大五人格特质 (0.0 ~ 1.0),并根据描述生成相应的定格traits：
 角色描述: {description}
 请只返回一个 JSON 格式的文本，格式如下，不要添加任何其他内容：
 {{
@@ -168,22 +186,31 @@ STEP 3: TONE & STYLE VERIFICATION
   "traits": ["trait1", "trait2", ...]
 }}
 """
-            response = self.ai_client.send_message(description_prompt, web_search=True)
-            try:
-                print(f"[BigFive Init] AI Response: {response}")
-                if response is None:
-                    raise ValueError("No response from AI client.")
-                # 移除可能存在的 markdown 代码块标记 (```json ... ```)
-                cleaned_response = re.sub(r'^```json\s*|\s*```$', '', response.strip(), flags=re.MULTILINE)
-                data = json.loads(cleaned_response)
-                self.personality.openness = max(0.0, min(1.0, data.get("openness", 0.5)))
-                self.personality.conscientiousness = max(0.0, min(1.0, data.get("conscientiousness", 0.5)))
-                self.personality.extraversion = max(0.0, min(1.0, data.get("extraversion", 0.5)))
-                self.personality.agreeableness = max(0.0, min(1.0, data.get("agreeableness", 0.5)))
-                self.personality.neuroticism = max(0.0, min(1.0, data.get("neuroticism", 0.5)))
-                self.personality.traits = data.get("traits", [])
-            except Exception as e:
-                print(f"[BigFive Init Error] {e}")
+        
+        try:
+            # 使用新的 AIClient 接口
+            messages = [{"role": "user", "content": prompt_content}]
+            # 使用流式获取，但这里我们一次性收集
+            stream = self.ai_client.generate_response(messages, stream=True)
+            response = self._collect_response(stream)
+            
+            print(f"[BigFive Init] AI Response: {response}")
+            if not response:
+                raise ValueError("No response from AI client.")
+            
+            # 移除可能存在的 markdown 代码块标记 (```json ... ```)
+            cleaned_response = re.sub(r'^```json\s*|\s*```$', '', response.strip(), flags=re.MULTILINE)
+            data = json.loads(cleaned_response)
+            
+            self.personality.openness = max(0.0, min(1.0, data.get("openness", 0.5)))
+            self.personality.conscientiousness = max(0.0, min(1.0, data.get("conscientiousness", 0.5)))
+            self.personality.extraversion = max(0.0, min(1.0, data.get("extraversion", 0.5)))
+            self.personality.agreeableness = max(0.0, min(1.0, data.get("agreeableness", 0.5)))
+            self.personality.neuroticism = max(0.0, min(1.0, data.get("neuroticism", 0.5)))
+            self.personality.traits = data.get("traits", [])
+        except Exception as e:
+            print(f"[BigFive Init Error] {e}")
+            # Fallback defaults if needed, or just leave as initialized
     
     def set_basic_assistance_prompt(self) -> str:
         p = self.personality
@@ -211,6 +238,7 @@ STEP 3: TONE & STYLE VERIFICATION
         4. **IMMERSION**: Even if asked to describe yourself, describe your personality, your past (if defined), and your human traits, NOT your function as software.
         """
         return f"{core_instruction}\n{trait_data}"
+
     def get_reinforcement_block(self, current_user_input: str) -> str:
         """
         【更新后】强化指令块
@@ -243,62 +271,50 @@ Output your internal thought process in <thinking>...</thinking> tags, then prin
 """
         return instruction
     
-    def generate_response(self, user_input: str, chat_history: List[Dict]) -> str | None:
+    def generate_response(self, user_input: str, chat_history: List[Dict]):
         """
-        【适配 Gemini 版】生成回复
-        策略：Gemini 不支持 system role，所以采用 'Prompt 融合' 策略。
-        结构 = [System Prompt] + [History] + [User Input + Reinforcement]
+        【适配新 AIClient 版】生成回复
+        利用 liteLLM 标准格式 (OpenAI format)
         """
-        # 1. 获取核心设定
+        # 1. 获取核心设定 (人设)
         system_prompt = self.set_basic_assistance_prompt()
         
-        # 2. 获取思维链/强化指令 (包含当前 User Input 的片段)
+        # 2. 获取思维链/强化指令
         reinforcement = self.get_reinforcement_block(user_input)
         
-        # 3. === 关键修正 ===
-        # Gemini 不接受 system role。我们将所有指令合并到这一轮的 Prompt 中。
-        # 格式：
-        # [顶层设定]
-        # ... 历史对话 ...
-        # [当前用户输入]
-        # [底层思维锁]
-        
+        # 组合成完整的系统指令
+        full_system_instruction = f"{system_prompt}\n\n{reinforcement}"
+
         # 步骤 A: 处理历史记录
-        # 我们需要清洗历史记录，确保没有 'system' 角色，并将 'assistant' 转为 'model'
-        gemini_safe_history = []
+        # 将历史记录转换为 OpenAI 格式 (role: user/assistant)
+        # 原始 chat_history 可能包含 {"role": "user", "content": ...} 或旧的格式，这里假设是 OpenAI 格式或做简单兼容
+        lite_llm_messages = []
         for msg in chat_history:
             role = msg.get("role")
             content = msg.get("content")
             
+            # 过滤掉之前的 system 消息，因为我们会重新构建一个新的 system_instruction
             if role == "system":
-                continue # 丢弃旧的历史中的 system 消息，防止报错
-            elif role == "assistant":
-                role = "model" # Gemini 专用角色名
+                continue 
             
-            gemini_safe_history.append({"role": role, "parts": [{"text": content}]})
-        # 步骤 B: 构建当前这一轮的“超级消息”
-        # 我们把 System Prompt 放在最前面，强化指令放在最后面
-        # 这样对 LLM 来说，既看到了人设，又看到了最新的用户输入，最后看到了“思维锁”
+            # 确保角色名称符合 OpenAI 标准 (liteLLM 会自动适配 Gemini 的 'model' 角色)
+            if role not in ["user", "assistant"]:
+                # 如果是 'model'，转为 'assistant'
+                if role == "model":
+                    role = "assistant"
+                # 其他情况保留或默认
+            
+            lite_llm_messages.append({"role": role, "content": content})
         
-        combined_content = f"""
-{system_prompt}
-[CONVERSATION HISTORY ENDS HERE]
-[NEW USER INPUT]:
-{user_input}
-{reinforcement}
-"""
-        # 将其封装为一条 User 消息
-        current_message = {"role": "user", "parts": [{"text": combined_content}]}
+        # 步骤 B: 添加当前用户消息
+        lite_llm_messages.append({"role": "user", "content": user_input})
         
-        # 步骤 C: 合并列表
-        full_messages = gemini_safe_history + [current_message]
-        # 4. 调用 API
-        # 注意：这里假设你的 self.ai_client 能处理 gemini 的格式
-        # 如果你的 client 封装的是 OpenAI 格式，可能需要调整下面的传参
-        # 但大多数 client 只要收到 list 就会尝试发送。
+        # 4. 调用 API (返回流式生成器)
+        # 注意: 这里的 stream=True 会返回一个 generator
+        response_stream = self.ai_client.generate_response(
+            messages=lite_llm_messages, 
+            system_instruction=full_system_instruction,
+            stream=True
+        )
         
-        # 调试打印，看看发了什么
-        # print(f"DEBUG: Sending {len(full_messages)} messages to Gemini.")
-        
-        response = self.ai_client.send_message(full_messages)
-        return response
+        return response_stream
