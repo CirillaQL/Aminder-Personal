@@ -8,7 +8,7 @@ from personal.person import Person
 def main():
     # 1. 实例化角色
     # 如果你是 Gemini，建议在 System Prompt 里加一句防止被过度审查的安全声明（这通常在 AIProvider 里处理，或者写在 Person 的 Kernel 里）
-    girl = Person(name="李诗情", gender="Female", if_original=False)
+    girl = Person(name="赵今麦", gender="Female", if_original=False)
     print(f"=== 初始化角色: {girl.name} (Powered by Gemini) ===")
     # 2. 初始化大五人格
     print(f"请输入一段描述 {girl.name} 性格的话: ")
@@ -25,7 +25,7 @@ def main():
     # 3. 处理经典台词 (目前为空的情况)
     # 既然暂时没有台词，我们直接在代码里设置一个“默认兜底”，
     # 告诉 CoT 只需要符合大五人格即可，不需要模仿特定句式。
-    girl.style_examples = "No specific past dialogues provided. Please speak naturally, strictly adhering to the Big Five traits and current Mood."
+    girl.set_style_examples([])
     
     # 4. 初始化历史记录
     chat_history = []

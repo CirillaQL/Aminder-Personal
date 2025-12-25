@@ -21,7 +21,7 @@ class AIClient:
         self.system_instruction = system_instruction
         self.default_params = kwargs
 
-    def generate_response(self, messages: List[Dict[str, Any]], model: Optional[str] = None, system_instruction: Optional[str] = None, stream: bool = False, **kwargs) -> Union[Any, Generator]:
+    def generate_response(self, messages: List[Dict[str, Any]], model: Optional[str] = None, system_instruction: Optional[str] = None, tools: Optional[List[Dict[str, Any]]] = None, stream: bool = False, **kwargs) -> Union[Any, Generator]:
         """
         Generates a response from the AI model. Supports streaming, system instructions, and multimodal inputs.
 
@@ -30,6 +30,7 @@ class AIClient:
                          Multimodal: [{'role': 'user', 'content': [{'type': 'text', 'text': 'Describe this'}, {'type': 'image_url', 'image_url': {'url': '...'}}]}]
         :param model: Optional model override.
         :param system_instruction: Optional system instruction override. If None, uses the default from __init__.
+        :param tools: Optional list of tools to enable (e.g., [{'google_search': {}}]).
         :param stream: Whether to stream the response. Defaults to False.
         :param kwargs: Optional overrides for generation parameters.
         :return: The response object from LiteLLM (or a generator if stream=True).
@@ -41,6 +42,9 @@ class AIClient:
         
         if self.api_key:
             params['api_key'] = self.api_key
+
+        if tools:
+            params['tools'] = tools
 
         # Handle system instruction
         active_system_instruction = system_instruction if system_instruction is not None else self.system_instruction
